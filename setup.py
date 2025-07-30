@@ -18,6 +18,8 @@ setup(
         "ml_dtypes",
         "llama_index",
         "pandas",
-        "seaborn"
+        "seaborn",
+        "streamlit",
+        "plotly"
     ],
     description="Utils for NPUEval dataset generation and evaluation.")
