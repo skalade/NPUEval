@@ -249,7 +249,7 @@ def create_trace_visualization(trace_data: dict) -> go.Figure:
         st.error(f"Error creating trace visualization: {e}")
         return go.Figure()
 
-def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, status_text=None, progress_bar=None) -> Dict[str, Any]:
+def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, selected_model: str, status_text=None, progress_bar=None) -> Dict[str, Any]:
     """
     Run the kernel generation pipeline.
     
@@ -267,9 +267,9 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
         output_dir = "streamlit_results"
         os.makedirs(output_dir, exist_ok=True)
         
-        # Initialize demo with local directory
+        # Initialize demo with selected model and local directory
         demo = NPUKernelDemo(
-            model="gpt-4o-mini", 
+            model=selected_model, 
             output_dir=output_dir
         )
         
@@ -369,14 +369,45 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         
-        # OpenAI API Key input
-        api_key = os.environ.get('OPENAI_API_KEY', '')
-        if not api_key:
-            api_key = st.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
-            if api_key:
-                os.environ['OPENAI_API_KEY'] = api_key
-        else:
-            st.success("✅ Using OpenAI API key from environment")
+        # Model selection
+        model_provider = st.selectbox(
+            "Model Provider",
+            ["OpenAI", "Ollama"],
+            help="Choose the LLM provider"
+        )
+        
+        if model_provider == "OpenAI":
+            # OpenAI API Key input
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if not api_key:
+                api_key = st.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
+                if api_key:
+                    os.environ['OPENAI_API_KEY'] = api_key
+            else:
+                st.success("✅ Using OpenAI API key from environment")
+            
+            # OpenAI model selection
+            openai_model = st.selectbox(
+                "OpenAI Model",
+                ["gpt-4o-mini", "gpt-4o", "gpt-4", "gpt-3.5-turbo"],
+                help="Choose the OpenAI model"
+            )
+            selected_model = openai_model
+            
+        else:  # Ollama
+            # Ollama configuration
+            ollama_url = st.text_input(
+                "Ollama URL", 
+                value="http://localhost:11434",
+                help="URL of your Ollama server"
+            )
+            
+            ollama_model = st.text_input(
+                "Ollama Model",
+                value="llama3.1:8b",
+                help="Name of the Ollama model to use"
+            )
+            selected_model = f"ollama:{ollama_model}"
         
         # Set default NPU device if not already set
         if 'NPU' not in os.environ:
@@ -507,7 +538,7 @@ def main():
         if submit_button:
             if not prompt.strip():
                 st.error("Please enter a kernel description")
-            elif not api_key:
+            elif model_provider == "OpenAI" and not api_key:
                 st.error("Please provide an OpenAI API key in the sidebar")
             else:
                 with st.spinner("Generating kernel... This may take a few minutes."):
@@ -519,7 +550,7 @@ def main():
                     progress_bar.progress(10)
                     
                     # Run generation and update progress as we go
-                    result = run_kernel_generation(prompt, kernel_name, data_type, array_size, status_text, progress_bar)
+                    result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, status_text, progress_bar)
                     
                     progress_bar.progress(100)
                     status_text.text("✅ Generation complete!")
