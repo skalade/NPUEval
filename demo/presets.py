@@ -32,17 +32,11 @@ PRESET_CONFIGS = {
         "data_type": "int32",
         "array_size": 256
     },
-    "Convolution 2D": {
-        "prompt": "Write a 2D convolution kernel that applies a filter to an input image",
-        "kernel_name": "conv2d_kernel",
+    "Negate": {
+        "prompt": "Negate each element in a vector of int8_t (length 512). The input is a buffer of 512 int8, and the output buffer receives the elementwise negation.",
+        "kernel_name": "negate",
         "data_type": "int8",
         "array_size": 512
-    },
-    "Max Pooling": {
-        "prompt": "Write a max pooling kernel that applies 2x2 max pooling to reduce the spatial dimensions",
-        "kernel_name": "maxpool_kernel",
-        "data_type": "int8",
-        "array_size": 1024
     },
     "Sigmoid Activation": {
         "prompt": "Write a sigmoid activation kernel that applies the sigmoid function (1/(1+exp(-x))) to each element",
