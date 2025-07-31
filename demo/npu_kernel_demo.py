@@ -42,10 +42,14 @@ class NPUKernelDemo:
         os.makedirs(output_dir, exist_ok=True)
     
     def extract_codeblock(self, text: str) -> Optional[str]:
-        """Extract code from markdown codeblocks."""
+        """Extract code from markdown codeblocks or return entire text if no codeblocks found."""
         code_blocks = re.findall(r'```(?:[a-zA-Z0-9]+)?\n(.*?)```|```(.*?)```', text, re.DOTALL)
         code_blocks = [block for match in code_blocks for block in match if block]
-        return code_blocks[0].strip() if code_blocks else None
+        if code_blocks:
+            return code_blocks[0].strip()
+        else:
+            # If no markdown codeblocks found, assume the entire response is code
+            return text.strip()
         
 
     def generate_kernel_from_prompt(self, prompt: str, kernel_name: str, data_type: str = "int8") -> Dict[str, Any]:
