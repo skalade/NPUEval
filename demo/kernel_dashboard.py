@@ -588,7 +588,7 @@ def main():
             # Generated code - show even if generation failed
             if result.get('generation', {}).get('generated_code'):
                 with st.expander("📄 Generated Kernel Code", expanded=True):
-                    st.code(result['generation']['generated_code'], language='cpp')
+                    st.code(result['generation']['generated_code'], language='cpp', height=400)
         
         elif st.session_state.generation_complete:
             st.info("No results to display")
