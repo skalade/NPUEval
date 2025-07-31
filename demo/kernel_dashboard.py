@@ -288,15 +288,15 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
                 status_text.text("📦 Generating xclbin...")
                 progress_bar.progress(60)
                 import time
-                time.sleep(0.5)  # Brief pause to show step
+                time.sleep(1)  # Brief pause to show step
                 
                 status_text.text("🚀 Running kernel on NPU...")
                 progress_bar.progress(80)
-                time.sleep(0.5)  # Brief pause to show step
+                time.sleep(1)  # Brief pause to show step
                 
                 status_text.text("📊 Collecting trace data...")
                 progress_bar.progress(90)
-                time.sleep(0.5)  # Brief pause to show step
+                time.sleep(1)  # Brief pause to show step
         
         # Copy trace data to session if available - look for the actual JSON trace file
         if result.get('success'):
@@ -390,7 +390,7 @@ def main():
             # OpenAI model selection
             openai_model = st.selectbox(
                 "OpenAI Model",
-                ["gpt-4o-mini", "gpt-4o", "gpt-4", "gpt-3.5-turbo"],
+                ["gpt-4o-mini", "gpt-4o", "gpt-4.1"],
                 help="Choose the OpenAI model"
             )
             selected_model = openai_model
