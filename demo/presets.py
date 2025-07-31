@@ -15,21 +15,27 @@ PRESET_CONFIGS = {
         "array_size": 1024
     },
     "ReLU Activation": {
-        "prompt": "Write a ReLU kernel that takes in vectors of elements and applies ReLU activation (max(0, x)) to each element",
+        "prompt": "Write a ReLU kernel that takes in vectors of 1024 int8 elements and applies ReLU activation (max(0, x)) to each element.",
+        "kernel_name": "relu_kernel",
+        "data_type": "int8",
+        "array_size": 1024
+    },
+    "ReLU Activation (Scalar)": {
+        "prompt": "Write a ReLU kernel that takes in a vector of 1024 int8 elements and applies ReLU activation (max(0, x)) to each element. Do not use AIE APIs.",
         "kernel_name": "relu_kernel",
         "data_type": "int8",
         "array_size": 1024
     },
     "Add Offset": {
-        "prompt": "Write a kernel that adds a constant offset of 5 to the input array.",
+        "prompt": "Write a kernel that adds a constant offset of 5 to the input array of 1024 elements with dtype of int16.",
         "kernel_name": "add_offset",
         "data_type": "int16",
         "array_size": 1024
     },
-    "Argmax": {
-        "prompt": "Return the index of the largest element of the input array.",
-        "kernel_name": "argmax",
-        "data_type": "int32",
+    "Cumsum": {
+        "prompt": "This AIE kernel computes the elementwise cumulative sum (cumsum) of a bfloat16 input vector of length 256. Each output element is the sum of all input elements up to and including that position.",
+        "kernel_name": "cumsum",
+        "data_type": "bfloat16",
         "array_size": 256
     },
     "Negate": {
@@ -39,16 +45,16 @@ PRESET_CONFIGS = {
         "array_size": 512
     },
     "Sigmoid Activation": {
-        "prompt": "Write a sigmoid activation kernel that applies the sigmoid function (1/(1+exp(-x))) to each element",
+        "prompt": "Write a sigmoid activation kernel that applies the sigmoid function (1/(1+exp(-x))) to each element of an input array of 256 bfloat16 values.",
         "kernel_name": "sigmoid_kernel",
         "data_type": "bfloat16",
-        "array_size": 1024
+        "array_size": 256
     },
     "Softmax": {
-        "prompt": "Write a softmax kernel that computes the softmax function across the last dimension of the input",
+        "prompt": "Write a softmax kernel that computes the softmax function on an input vector of 512 bfloat16 elements.",
         "kernel_name": "softmax_kernel",
         "data_type": "bfloat16",
-        "array_size": 1024
+        "array_size": 512
     }
 }
 
