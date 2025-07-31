@@ -13,10 +13,9 @@ import numpy as np
 from typing import Optional, Dict, Any, Tuple
 
 import openai
+from ml_dtypes import bfloat16
 
 # Import npueval modules
-from npueval.npueval import run_functional_tests
-from npueval.utils import extract_buffers
 from npueval.iron import build_app
 from npueval.tools import aie_compiler, build_single_kernel_app
 from npueval.executor import NPUExecutor
@@ -156,6 +155,16 @@ void add_offset_int8(int8_t *in_buffer, int8_t *out_buffer, int8_t offset) {
         """
         print("Generating reference implementation...")
         
+        # Special handling for bfloat16 in the prompt
+        if data_type == "bfloat16":
+            dtype_info = """
+Data type: bfloat16 (use bfloat16 type, not np.bfloat16)
+Example usage: 
+- For creating arrays: result = input_array.astype(bfloat16)
+- For operations: use regular numpy operations, then cast to bfloat16 if needed"""
+        else:
+            dtype_info = f"Data type: {data_type}"
+
         reference_prompt = f"""Generate a Python function that implements: {prompt}
 
 The function should:
@@ -164,8 +173,10 @@ The function should:
 - Implement the exact mathematical operation described
 - Function name should be 'reference_implementation'
 
-Data type: {data_type}
-Array size: {array_size}"""
+{dtype_info}
+Array size: {array_size}
+
+Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
 
         response = self.client.chat.completions.create(
             model=self.model,
@@ -192,7 +203,7 @@ Array size: {array_size}"""
         
         Args:
             prompt: Description of the mathematical operation for reference generation
-            data_type: Data type for arrays ("int8", "bfloat16", etc.)
+            data_type: Data type for arrays ("int8", "int16", "int32", "bfloat16")
             size: Size of the arrays
             
         Returns:
@@ -203,26 +214,25 @@ Array size: {array_size}"""
         # Generate input array
         if data_type == "int8":
             input_array = np.random.randint(-128, 127, size=size, dtype=np.int8)
-        elif data_type == "uint8":
-            input_array = np.random.randint(0, 255, size=size, dtype=np.uint8)
         elif data_type == "int16":
             input_array = np.random.randint(-32768, 32767, size=size, dtype=np.int16)
         elif data_type == "int32":
             input_array = np.random.randint(-2147483648, 2147483647, size=size, dtype=np.int32)
-        elif data_type == "bfloat16" or data_type == "float32":
-            input_array = np.random.randn(size).astype(np.float32)
+        elif data_type == "bfloat16":
+            input_array = np.random.randn(size).astype(bfloat16)
         else:
-            raise ValueError(f"Unsupported data type: {data_type}")
+            raise ValueError(f"Unsupported data type: {data_type}. NPU supports only int8, int16, int32, and bfloat16.")
         
         # Generate reference implementation using LLM
         reference_code = self.generate_reference_implementation(prompt, data_type, size)
         
         # Execute the reference code to get expected output
         local_vars = {'np': np, 'input_array': input_array}
+        global_vars = {'np': np, 'bfloat16': bfloat16}
         
         try:
             # Execute the generated reference function
-            exec(reference_code, {'np': np}, local_vars)
+            exec(reference_code, global_vars, local_vars)
             
             # Call the reference implementation
             if 'reference_implementation' in local_vars:
@@ -233,14 +243,12 @@ Array size: {array_size}"""
             # Ensure output has correct dtype
             if data_type == "int8":
                 reference_output = reference_output.astype(np.int8)
-            elif data_type == "uint8":
-                reference_output = reference_output.astype(np.uint8)
             elif data_type == "int16":
                 reference_output = reference_output.astype(np.int16)
             elif data_type == "int32":
                 reference_output = reference_output.astype(np.int32)
-            elif data_type == "bfloat16" or data_type == "float32":
-                reference_output = reference_output.astype(np.float32)
+            elif data_type == "bfloat16":
+                reference_output = reference_output.astype(bfloat16)
             
         except Exception as e:
             print(f"Error executing reference implementation: {e}")
@@ -285,7 +293,7 @@ extern "C" {{
             output_dir=self.output_dir,
             compiler="peano",
             dev=os.environ.get('NPU', 'npu1_1col'),
-            verbose_output=True
+            verbose_output=False
         )
         
         if not compile_result.startswith('Compilation successful.'):
@@ -409,6 +417,12 @@ extern "C" {{
         print(f"Data type: {data_type}, Array size: {array_size}")
         print("=" * 50)
         
+        generation_result = None
+        input_array = None
+        expected_output = None
+        build_result = None
+        verification_result = None
+        
         try:
             # Step 1: Generate kernel code
             generation_result = self.generate_kernel_from_prompt(prompt, kernel_name)
@@ -467,15 +481,42 @@ extern "C" {{
             return demo_result
             
         except Exception as e:
+            # Build error result, preserving any successful steps
             error_result = {
                 'success': False,
                 'error': str(e),
                 'error_type': type(e).__name__
             }
             
+            # Preserve generation result if it was successful
+            if generation_result:
+                error_result['generation'] = generation_result
+            
+            # Preserve test data if arrays were created
+            if input_array is not None and expected_output is not None:
+                error_result['test_data'] = {
+                    'input_shape': input_array.shape,
+                    'input_dtype': str(input_array.dtype),
+                    'output_shape': expected_output.shape,
+                    'output_dtype': str(expected_output.dtype)
+                }
+            
+            # Preserve build result if it was successful
+            if build_result:
+                error_result['build'] = build_result
+                
+            # Preserve verification result if it was attempted
+            if verification_result:
+                error_result['verification'] = verification_result
+            
             error_file = f"{self.output_dir}/{kernel_name}_error.json"
             with open(error_file, 'w') as f:
-                json.dump(error_result, f, indent=2)
+                # Handle numpy arrays for JSON serialization
+                json_result = error_result.copy()
+                if input_array is not None and expected_output is not None:
+                    json_result['test_data']['input_sample'] = input_array[:10].tolist()
+                    json_result['test_data']['expected_output_sample'] = expected_output[:10].tolist()
+                json.dump(json_result, f, indent=2)
                 
             print(f"\n=== Demo Failed ===")
             print(f"Error: {e}")

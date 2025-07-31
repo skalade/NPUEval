@@ -443,16 +443,16 @@ def main():
                 "data_type": "int8",
                 "array_size": 1024
             },
-            "Vector Addition": {
-                "prompt": "Write a kernel that adds two input vectors element-wise and stores the result in an output vector",
-                "kernel_name": "vector_add",
-                "data_type": "float32",
+            "Add Offset": {
+                "prompt": "Write a kernel that adds a constant offset of 5 to the input array.",
+                "kernel_name": "add_offset",
+                "data_type": "int16",
                 "array_size": 1024
             },
-            "Matrix Multiplication": {
-                "prompt": "Write a matrix multiplication kernel that multiplies two matrices and stores the result",
-                "kernel_name": "matmul_kernel",
-                "data_type": "float32",
+            "Argmax": {
+                "prompt": "Return the index of the largest element of the input array.",
+                "kernel_name": "argmax",
+                "data_type": "int32",
                 "array_size": 256
             },
             "Convolution 2D": {
@@ -470,13 +470,13 @@ def main():
             "Sigmoid Activation": {
                 "prompt": "Write a sigmoid activation kernel that applies the sigmoid function (1/(1+exp(-x))) to each element",
                 "kernel_name": "sigmoid_kernel",
-                "data_type": "float32",
+                "data_type": "bfloat16",
                 "array_size": 1024
             },
             "Softmax": {
                 "prompt": "Write a softmax kernel that computes the softmax function across the last dimension of the input",
                 "kernel_name": "softmax_kernel",
-                "data_type": "float32",
+                "data_type": "bfloat16",
                 "array_size": 1024
             }
         }
@@ -513,13 +513,17 @@ def main():
                 )
             
             with col_b:
-                data_type_options = ["int8", "uint8", "int16", "int32", "float32"]
-                data_type_index = data_type_options.index(default_data_type)
+                data_type_options = ["int8", "int16", "int32", "bfloat16"]
+                # Handle case where default_data_type is not in the new options
+                try:
+                    data_type_index = data_type_options.index(default_data_type)
+                except ValueError:
+                    data_type_index = 0  # Default to int8 if unsupported type
                 data_type = st.selectbox(
                     "Data Type",
                     data_type_options,
                     index=data_type_index,
-                    help="Data type for input/output arrays"
+                    help="NPU-compatible data types: int8, int16, int32, bfloat16"
                 )
             
             with col_c:
