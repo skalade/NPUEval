@@ -17,8 +17,9 @@ from plotly.subplots import make_subplots
 import tempfile
 from typing import Dict, Any, Optional
 
-# Import the demo functionality
+# Import the demo functionality and presets
 from npu_kernel_demo import NPUKernelDemo
+from presets import PRESET_CONFIGS, SUPPORTED_DATA_TYPES
 
 def init_session_state():
     """Initialize session state variables."""
@@ -430,65 +431,14 @@ def main():
     
     with col1:
         # Preset kernel prompts dropdown (outside form for dynamic updates)
-        preset_configs = {
-            "Custom (enter your own)": {
-                "prompt": "",
-                "kernel_name": "my_kernel",
-                "data_type": "int8",
-                "array_size": 1024
-            },
-            "ReLU Activation": {
-                "prompt": "Write a ReLU kernel that takes in vectors of elements and applies ReLU activation (max(0, x)) to each element",
-                "kernel_name": "relu_kernel",
-                "data_type": "int8",
-                "array_size": 1024
-            },
-            "Add Offset": {
-                "prompt": "Write a kernel that adds a constant offset of 5 to the input array.",
-                "kernel_name": "add_offset",
-                "data_type": "int16",
-                "array_size": 1024
-            },
-            "Argmax": {
-                "prompt": "Return the index of the largest element of the input array.",
-                "kernel_name": "argmax",
-                "data_type": "int32",
-                "array_size": 256
-            },
-            "Convolution 2D": {
-                "prompt": "Write a 2D convolution kernel that applies a filter to an input image",
-                "kernel_name": "conv2d_kernel",
-                "data_type": "int8",
-                "array_size": 512
-            },
-            "Max Pooling": {
-                "prompt": "Write a max pooling kernel that applies 2x2 max pooling to reduce the spatial dimensions",
-                "kernel_name": "maxpool_kernel",
-                "data_type": "int8",
-                "array_size": 1024
-            },
-            "Sigmoid Activation": {
-                "prompt": "Write a sigmoid activation kernel that applies the sigmoid function (1/(1+exp(-x))) to each element",
-                "kernel_name": "sigmoid_kernel",
-                "data_type": "bfloat16",
-                "array_size": 1024
-            },
-            "Softmax": {
-                "prompt": "Write a softmax kernel that computes the softmax function across the last dimension of the input",
-                "kernel_name": "softmax_kernel",
-                "data_type": "bfloat16",
-                "array_size": 1024
-            }
-        }
-        
         preset_choice = st.selectbox(
             "Preset Kernel Prompts",
-            options=list(preset_configs.keys()),
+            options=list(PRESET_CONFIGS.keys()),
             help="Choose a preset prompt or select 'Custom' to enter your own"
         )
         
         # Auto-populate all fields based on selection
-        config = preset_configs[preset_choice]
+        config = PRESET_CONFIGS[preset_choice]
         default_prompt = config["prompt"]
         default_kernel_name = config["kernel_name"]
         default_data_type = config["data_type"]
@@ -513,15 +463,14 @@ def main():
                 )
             
             with col_b:
-                data_type_options = ["int8", "int16", "int32", "bfloat16"]
-                # Handle case where default_data_type is not in the new options
+                # Handle case where default_data_type is not in the supported options
                 try:
-                    data_type_index = data_type_options.index(default_data_type)
+                    data_type_index = SUPPORTED_DATA_TYPES.index(default_data_type)
                 except ValueError:
                     data_type_index = 0  # Default to int8 if unsupported type
                 data_type = st.selectbox(
                     "Data Type",
-                    data_type_options,
+                    SUPPORTED_DATA_TYPES,
                     index=data_type_index,
                     help="NPU-compatible data types: int8, int16, int32, bfloat16"
                 )
@@ -575,9 +524,54 @@ def main():
             # Status indicator
             if result.get('success'):
                 st.success("✅ Kernel generation and verification successful!")
+                
+                # Display performance metrics and data samples if available
+                verification = result.get('verification', {})
+                test_data = result.get('test_data', {})
+                total_cycles = verification.get('total_cycles')
+                
+                col_a, col_b = st.columns(2)
+                
+                # Show input/output samples if available
+                input_sample = test_data.get('input_sample', [])
+                npu_output_sample = test_data.get('npu_output_sample', [])
+                
+                with col_a:
+                    if input_sample and npu_output_sample:
+                        sample_size = min(5, len(input_sample), len(npu_output_sample))
+                        input_str = "[" + ", ".join(str(input_sample[i]) for i in range(sample_size)) + ", ...]"
+                        output_str = "[" + ", ".join(str(npu_output_sample[i]) for i in range(sample_size)) + ", ...]"
+                        st.text(f"Input:  {input_str}")
+                        st.text(f"Output: {output_str}")
+                    elif input_sample:
+                        sample_size = min(5, len(input_sample))
+                        input_str = "[" + ", ".join(str(input_sample[i]) for i in range(sample_size)) + ", ...]"
+                        st.text(input_str)
+                    else:
+                        st.markdown("**No sample data available**")
+                
+                # Show total cycles if available
+                if total_cycles is not None:
+                    with col_b:
+                        st.metric("Total Cycles", f"{total_cycles:,}")
             else:
-                st.error("❌ Kernel generation failed")
-                if result.get('error'):
+                # Display specific error message based on failed step
+                failed_step = result.get('failed_step', 'Unknown step')
+                if failed_step == 'LLM generation failed':
+                    st.error("❌ LLM kernel generation failed")
+                elif failed_step == 'Reference implementation generation failed':
+                    st.error("❌ Reference implementation generation failed")
+                elif failed_step == 'Kernel compilation failed':
+                    st.error("❌ Kernel compilation failed")
+                elif failed_step == 'NPU verification failed':
+                    st.error("❌ NPU verification failed")
+                else:
+                    st.error("❌ Kernel generation pipeline failed")
+                
+                # Show detailed error message
+                if result.get('detailed_error'):
+                    st.error(f"Details: {result['detailed_error']}")
+                elif result.get('error'):
                     st.error(f"Error: {result['error']}")
     
     with col2:

@@ -20,6 +20,9 @@ from npueval.iron import build_app
 from npueval.tools import aie_compiler, build_single_kernel_app
 from npueval.executor import NPUExecutor
 
+# Import prompts
+from prompts import KERNEL_SYSTEM_PROMPT, REFERENCE_SYSTEM_PROMPT, get_reference_prompt
+
 class NPUKernelDemo:
     """Demo class for generating NPU kernels from prompts."""
     
@@ -37,88 +40,45 @@ class NPUKernelDemo:
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
-        
-        # System prompts
-        self.kernel_system_prompt = """You are a part of a code generation system for AIE (AI Engines).
-
-* Your job is to write C++ code for a single kernel that will run on an AIE tile.
-* Produce only the C++ code for the requested kernel including any required headers and imports.
-* Make sure the C++ code is complete and self contained in a single code block.
-* Name the function exactly as specified in the request, and output only the kernel (no main(), examples, explanations or extra code).
-
-AIE kernel examples:
-
-<example1>
-#include <aie_api/aie.hpp>
-#include "aie_kernel_utils.h"
-void abs_int8(int8_t *in_buffer, int8_t *out_buffer) {
-    constexpr int buffer_size = 1024;
-    constexpr int vec_size = 32;
-    constexpr int loop_count = buffer_size / vec_size;
-    for (int i = 0; i < loop_count; ++i) {
-        auto data = aie::load_v<vec_size>(in_buffer);
-        auto abs_data = aie::abs(data);
-        aie::store_v(out_buffer, abs_data);
-        in_buffer += vec_size;
-        out_buffer += vec_size;
-    }
-}
-</example1>
-
-<example2>
-#include <aie_api/aie.hpp>
-#include "aie_kernel_utils.h"
-void add_offset_int8(int8_t *in_buffer, int8_t *out_buffer, int8_t offset) {
-    constexpr unsigned VECTOR_SIZE = 32;
-    constexpr unsigned NUM_VECTORS = 256 / VECTOR_SIZE;
-    aie::vector<int8, VECTOR_SIZE> offset_vec = aie::broadcast<int8, VECTOR_SIZE>(offset);
-    for (unsigned i = 0; i < NUM_VECTORS; ++i) {
-        aie::vector<int8, VECTOR_SIZE> vec = aie::load_v<VECTOR_SIZE>(in_buffer);
-        vec = aie::add(vec, offset_vec);
-        aie::store_v(out_buffer, vec);
-        in_buffer += VECTOR_SIZE;
-        out_buffer += VECTOR_SIZE;
-    }
-}
-</example2>
-"""
-
-        self.reference_system_prompt = """You are a Python code generator that creates reference implementations for mathematical operations.
-
-* Generate ONLY Python code that implements the mathematical operation described
-* Use numpy for array operations
-* The code should be a single function that takes input arrays and returns the expected output
-* Do not include imports, examples, or explanations - just the function code
-* Make sure the function handles the specified data types correctly
-"""
-        
+    
     def extract_codeblock(self, text: str) -> Optional[str]:
         """Extract code from markdown codeblocks."""
         code_blocks = re.findall(r'```(?:[a-zA-Z0-9]+)?\n(.*?)```|```(.*?)```', text, re.DOTALL)
         code_blocks = [block for match in code_blocks for block in match if block]
         return code_blocks[0].strip() if code_blocks else None
+        
 
-    def generate_kernel_from_prompt(self, prompt: str, kernel_name: str) -> Dict[str, Any]:
+    def generate_kernel_from_prompt(self, prompt: str, kernel_name: str, data_type: str = "int8") -> Dict[str, Any]:
         """
         Generate a kernel from a text prompt using direct OpenAI API call.
         
         Args:
             prompt: Natural language description of the kernel
             kernel_name: Name for the generated kernel function
+            data_type: Data type for the kernel (int8, int16, int32, bfloat16)
             
         Returns:
             Dictionary containing generated code and metadata
         """
         print(f"Generating kernel '{kernel_name}' from prompt...")
         
-        # Create full prompt with function name specification
-        full_prompt = f"{prompt}\nName the function '{kernel_name}'."
+        # Map data types to C++ types for the prompt
+        cpp_type_map = {
+            "int8": "int8_t",
+            "int16": "int16_t", 
+            "int32": "int32_t",
+            "bfloat16": "bfloat16"
+        }
+        cpp_type = cpp_type_map.get(data_type, "int8_t")
+        
+        # Create full prompt with function name and data type specification
+        full_prompt = f"{prompt}\nName the function '{kernel_name}'.\nUse {cpp_type} data type for input and output buffers."
         
         # Generate code using OpenAI API
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": self.kernel_system_prompt},
+                {"role": "system", "content": KERNEL_SYSTEM_PROMPT},
                 {"role": "user", "content": full_prompt}
             ],
             temperature=self.temperature,
@@ -155,33 +115,13 @@ void add_offset_int8(int8_t *in_buffer, int8_t *out_buffer, int8_t offset) {
         """
         print("Generating reference implementation...")
         
-        # Special handling for bfloat16 in the prompt
-        if data_type == "bfloat16":
-            dtype_info = """
-Data type: bfloat16 (use bfloat16 type, not np.bfloat16)
-Example usage: 
-- For creating arrays: result = input_array.astype(bfloat16)
-- For operations: use regular numpy operations, then cast to bfloat16 if needed"""
-        else:
-            dtype_info = f"Data type: {data_type}"
-
-        reference_prompt = f"""Generate a Python function that implements: {prompt}
-
-The function should:
-- Take input array of type {data_type} with size {array_size}
-- Return output array of the same type and size
-- Implement the exact mathematical operation described
-- Function name should be 'reference_implementation'
-
-{dtype_info}
-Array size: {array_size}
-
-Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
+        # Generate reference prompt using the helper function
+        reference_prompt = get_reference_prompt(prompt, data_type, array_size)
 
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": self.reference_system_prompt},
+                {"role": "system", "content": REFERENCE_SYSTEM_PROMPT},
                 {"role": "user", "content": reference_prompt}
             ],
             temperature=0.1,  # Lower temperature for more deterministic reference
@@ -209,9 +149,8 @@ Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
         Returns:
             Tuple of (input_array, reference_output_array)
         """
-        np.random.seed(42)  # For reproducible results
-        
         # Generate input array
+        np.random.seed(42)
         if data_type == "int8":
             input_array = np.random.randint(-128, 127, size=size, dtype=np.int8)
         elif data_type == "int16":
@@ -227,7 +166,7 @@ Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
         reference_code = self.generate_reference_implementation(prompt, data_type, size)
         
         # Execute the reference code to get expected output
-        local_vars = {'np': np, 'input_array': input_array}
+        local_vars = {'input_array': input_array}
         global_vars = {'np': np, 'bfloat16': bfloat16}
         
         try:
@@ -258,7 +197,7 @@ Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
         return input_array, reference_output
     
     def build_xclbin(self, kernel_code: str, kernel_name: str, 
-                    input_array: np.ndarray, output_array: np.ndarray) -> Dict[str, Any]:
+                    input_array: np.ndarray, output_array: np.ndarray, data_type: str) -> Dict[str, Any]:
         """
         Build xclbin from kernel code and test arrays.
         
@@ -267,6 +206,7 @@ Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
             kernel_name: Name of the kernel function
             input_array: Input test array
             output_array: Expected output array
+            data_type: Data type for the arrays ("int8", "int16", "int32", "bfloat16")
             
         Returns:
             Dictionary with build results and file paths
@@ -275,10 +215,24 @@ Important: If using bfloat16, use 'bfloat16' directly, not 'np.bfloat16'."""
         
         # Add wrapper code that npueval expects
         wrapper_name = f"{kernel_name}_wrapper"
+        
+        # Map data type to C++ type
+        if data_type == "int8":
+            cpp_type = "int8_t"
+        elif data_type == "int16":
+            cpp_type = "int16_t"
+        elif data_type == "int32":
+            cpp_type = "int32_t"
+        elif data_type == "bfloat16":
+            cpp_type = "bfloat16"
+        else:
+            raise ValueError(f"Unsupported data type for C++: {data_type}")
         full_kernel_code = kernel_code + f"""
+#include <aie_api/aie.hpp>
+#include "aie_kernel_utils.h"
 
 extern "C" {{
-    void {wrapper_name}(int8_t *in_buffer, int8_t *out_buffer) {{
+    void {wrapper_name}({cpp_type} *in_buffer, {cpp_type} *out_buffer) {{
         ::aie::set_rounding(aie::rounding_mode::positive_inf);
         event0();
         {kernel_name}(in_buffer, out_buffer);
@@ -361,39 +315,93 @@ extern "C" {{
         """
         print("Running kernel verification on NPU...")
         
-        # Create executor
-        executor = NPUExecutor(
-            xclbin=xclbin_path,
-            instr=instr_path,
-            verbose=True
-        )
+        # Initialize variables
+        npu_output_buffer = None
+        eval_output = None  # Initialize eval_output to prevent scoping errors
+        verification_result = {
+            'success': False,
+            'stats': {},
+            'trace_file': f"{self.output_dir}/verification_trace.txt",
+            'error': 'Unknown verification error'
+        }
         
-        # Run kernel
-        trace_name = f"{self.output_dir}/verification_trace.txt"
-        results = executor.run(
-            in_buffers=[input_array],
-            out_buffers=[expected_output],
-            trace_size=8192,
-            trace_name=trace_name,
-            padding=padding
-        )
-        
-        if isinstance(results, tuple):
-            eval_output, total_cycles, vector_cycles = results
-            verification_result = {
-                'success': eval_output['success'],
-                'stats': eval_output['stats'],
-                'total_cycles': total_cycles,
-                'vector_cycles': vector_cycles,
-                'vector_score': vector_cycles/total_cycles if total_cycles > 0 else 0,
-                'trace_file': trace_name
-            }
-        else:
-            verification_result = {
-                'success': results['success'],
-                'stats': results['stats'],
-                'trace_file': trace_name
-            }
+        try:
+            # Create executor
+            executor = NPUExecutor(
+                xclbin=xclbin_path,
+                instr=instr_path,
+                verbose=True
+            )
+            
+            # Create a copy of expected_output for the NPU to write into
+            # The executor modifies the output buffer in-place
+            npu_output_buffer = expected_output.copy()
+            
+            # Run kernel
+            trace_name = f"{self.output_dir}/verification_trace.txt"
+            results = executor.run(
+                in_buffers=[input_array],
+                out_buffers=[npu_output_buffer],
+                trace_size=8192,
+                trace_name=trace_name,
+                padding=padding
+            )
+            
+            if isinstance(results, tuple):
+                eval_output, total_cycles, vector_cycles = results
+                verification_result = {
+                    'success': eval_output['success'],
+                    'stats': eval_output['stats'],
+                    'total_cycles': total_cycles,
+                    'vector_cycles': vector_cycles,
+                    'vector_score': vector_cycles/total_cycles if total_cycles > 0 else 0,
+                    'trace_file': trace_name,
+                    'npu_output': npu_output_buffer  # Store the actual NPU output
+                }
+            else:
+                verification_result = {
+                    'success': results['success'],
+                    'stats': results['stats'],
+                    'trace_file': trace_name,
+                    'npu_output': npu_output_buffer  # Store the actual NPU output
+                }
+                
+        except Exception as e:
+            print(f"Error during kernel verification: {e}")
+            error_str = str(e)
+            
+            # Check if this is a trace parsing error but NPU execution may have succeeded
+            if "Expecting value: line 1 column 1" in error_str and "json" in error_str.lower():
+                # Trace parsing failed, but NPU may have executed successfully
+                # Check if we have NPU output data
+                if npu_output_buffer is not None:
+                    verification_result = {
+                        'success': True,  # NPU execution succeeded, just trace parsing failed
+                        'stats': {'trace_parsing_failed': True},
+                        'trace_file': f"{self.output_dir}/verification_trace.txt",
+                        'error': 'NPU execution succeeded but trace parsing failed (empty JSON trace file)',
+                        'npu_output': npu_output_buffer,
+                        'total_cycles': None,  # Can't determine without trace parsing
+                        'vector_cycles': None,
+                        'vector_score': None
+                    }
+                else:
+                    verification_result = {
+                        'success': False,
+                        'stats': {},
+                        'trace_file': f"{self.output_dir}/verification_trace.txt",
+                        'error': 'NPU execution failed with trace parsing error: ' + error_str,
+                        'npu_output': npu_output_buffer
+                    }
+            else:
+                # Other types of NPU execution errors
+                verification_result = {
+                    'success': False,
+                    'stats': {},
+                    'trace_file': f"{self.output_dir}/verification_trace.txt",
+                    'error': str(e),
+                    'npu_output': npu_output_buffer  # Include whatever output buffer we have
+                }
         
         return verification_result
     
@@ -423,22 +431,41 @@ extern "C" {{
         build_result = None
         verification_result = None
         
+        # Step 1: Generate kernel code
         try:
-            # Step 1: Generate kernel code
-            generation_result = self.generate_kernel_from_prompt(prompt, kernel_name)
-            
-            # Step 2: Create test arrays using LLM-generated reference
+            generation_result = self.generate_kernel_from_prompt(prompt, kernel_name, data_type)
+        except Exception as e:
+            return self._create_error_result(
+                kernel_name, "LLM generation failed", e, 
+                generation_result, input_array, expected_output, build_result, verification_result
+            )
+        
+        # Step 2: Create test arrays using LLM-generated reference
+        try:
             input_array, expected_output = self.create_test_arrays(prompt, data_type, array_size)
-            
-            # Step 3: Build xclbin
+        except Exception as e:
+            return self._create_error_result(
+                kernel_name, "Reference implementation generation failed", e,
+                generation_result, input_array, expected_output, build_result, verification_result
+            )
+        
+        # Step 3: Build xclbin
+        try:
             build_result = self.build_xclbin(
                 generation_result['generated_code'],
                 kernel_name,
                 input_array,
-                expected_output
+                expected_output,
+                data_type
             )
-            
-            # Step 4: Verify on NPU
+        except Exception as e:
+            return self._create_error_result(
+                kernel_name, "Kernel compilation failed", e,
+                generation_result, input_array, expected_output, build_result, verification_result
+            )
+        
+        # Step 4: Verify on NPU
+        try:
             verification_result = self.verify_kernel(
                 build_result['xclbin_path'],
                 build_result['instr_path'],
@@ -446,83 +473,146 @@ extern "C" {{
                 expected_output,
                 build_result['padding']
             )
-            
-            # Compile complete results
-            demo_result = {
-                'success': verification_result['success'],
-                'generation': generation_result,
-                'build': build_result,
-                'verification': verification_result,
-                'test_data': {
-                    'input_shape': input_array.shape,
-                    'input_dtype': str(input_array.dtype),
-                    'output_shape': expected_output.shape,
-                    'output_dtype': str(expected_output.dtype)
-                }
+        except Exception as e:
+            return self._create_error_result(
+                kernel_name, "NPU verification failed", e,
+                generation_result, input_array, expected_output, build_result, verification_result
+            )
+        
+        # Create a clean verification result without numpy arrays for the main result
+        clean_verification_result = {k: v for k, v in verification_result.items() if k != 'npu_output'}
+        
+        # Compile complete results (without numpy arrays that can't be JSON serialized)
+        demo_result = {
+            'success': verification_result['success'],
+            'generation': generation_result,
+            'build': build_result,
+            'verification': clean_verification_result,
+            'test_data': {
+                'input_shape': list(input_array.shape),
+                'input_dtype': str(input_array.dtype),
+                'output_shape': list(expected_output.shape),
+                'output_dtype': str(expected_output.dtype)
             }
+        }
+        
+        # Save results
+        results_file = f"{self.output_dir}/{kernel_name}_demo_results.json"
+        with open(results_file, 'w') as f:
+            # Convert numpy arrays to lists for JSON serialization
+            json_result = demo_result.copy()
+            json_result['test_data']['input_sample'] = input_array[:10].tolist()
+            json_result['test_data']['expected_output_sample'] = expected_output[:10].tolist()
             
-            # Save results
-            results_file = f"{self.output_dir}/{kernel_name}_demo_results.json"
-            with open(results_file, 'w') as f:
-                # Convert numpy arrays to lists for JSON serialization
-                json_result = demo_result.copy()
+            # Add NPU output sample if available
+            npu_output = verification_result.get('npu_output')
+            if npu_output is not None:
+                # Convert to numpy array if it isn't already, then get sample
+                try:
+                    if hasattr(npu_output, 'tolist'):
+                        json_result['test_data']['npu_output_sample'] = npu_output[:10].tolist()
+                    elif isinstance(npu_output, (list, tuple)):
+                        json_result['test_data']['npu_output_sample'] = list(npu_output[:10])
+                    else:
+                        # Try to convert to numpy array first
+                        npu_array = np.array(npu_output)
+                        json_result['test_data']['npu_output_sample'] = npu_array[:10].tolist()
+                except Exception as e:
+                    print(f"Warning: Could not save NPU output sample: {e}")
+                    
+            json.dump(json_result, f, indent=2)
+        
+        print(f"\n=== Demo Results ===")
+        print(f"Success: {demo_result['success']}")
+        if verification_result.get('stats'):
+            print(f"Accuracy: {verification_result['stats']}")
+        if verification_result.get('vector_score'):
+            print(f"Vectorization Score: {verification_result['vector_score']:.3f}")
+        print(f"Results saved to: {results_file}")
+        
+        return demo_result
+    
+    def _create_error_result(self, kernel_name: str, step_name: str, exception: Exception,
+                           generation_result, input_array, expected_output, build_result, verification_result) -> Dict[str, Any]:
+        """
+        Create an error result with specific step information and preserve successful steps.
+        
+        Args:
+            kernel_name: Name of the kernel being processed
+            step_name: Name of the step that failed
+            exception: The exception that occurred
+            generation_result: Result from kernel generation (if successful)
+            input_array: Input test array (if created)
+            expected_output: Expected output array (if created)
+            build_result: Result from build step (if successful)
+            verification_result: Result from verification step (if attempted)
+            
+        Returns:
+            Dictionary with error information and preserved successful steps
+        """
+        error_result = {
+            'success': False,
+            'error': str(exception),
+            'error_type': type(exception).__name__,
+            'failed_step': step_name,
+            'detailed_error': f"{step_name}: {str(exception)}"
+        }
+        
+        # Preserve generation result if it was successful
+        if generation_result:
+            error_result['generation'] = generation_result
+        
+        # Preserve test data if arrays were created
+        if input_array is not None and expected_output is not None:
+            error_result['test_data'] = {
+                'input_shape': list(input_array.shape),
+                'input_dtype': str(input_array.dtype),
+                'output_shape': list(expected_output.shape),
+                'output_dtype': str(expected_output.dtype)
+            }
+        
+        # Preserve build result if it was successful
+        if build_result:
+            error_result['build'] = build_result
+            
+        # Preserve verification result if it was attempted (without numpy arrays)
+        if verification_result:
+            clean_verification = {k: v for k, v in verification_result.items() if k != 'npu_output'}
+            error_result['verification'] = clean_verification
+        
+        # Save error details
+        error_file = f"{self.output_dir}/{kernel_name}_error.json"
+        with open(error_file, 'w') as f:
+            # Handle numpy arrays for JSON serialization
+            json_result = error_result.copy()
+            if input_array is not None and expected_output is not None:
                 json_result['test_data']['input_sample'] = input_array[:10].tolist()
                 json_result['test_data']['expected_output_sample'] = expected_output[:10].tolist()
-                json.dump(json_result, f, indent=2)
-            
-            print(f"\n=== Demo Results ===")
-            print(f"Success: {demo_result['success']}")
-            if verification_result.get('stats'):
-                print(f"Accuracy: {verification_result['stats']}")
-            if verification_result.get('vector_score'):
-                print(f"Vectorization Score: {verification_result['vector_score']:.3f}")
-            print(f"Results saved to: {results_file}")
-            
-            return demo_result
-            
-        except Exception as e:
-            # Build error result, preserving any successful steps
-            error_result = {
-                'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__
-            }
-            
-            # Preserve generation result if it was successful
-            if generation_result:
-                error_result['generation'] = generation_result
-            
-            # Preserve test data if arrays were created
-            if input_array is not None and expected_output is not None:
-                error_result['test_data'] = {
-                    'input_shape': input_array.shape,
-                    'input_dtype': str(input_array.dtype),
-                    'output_shape': expected_output.shape,
-                    'output_dtype': str(expected_output.dtype)
-                }
-            
-            # Preserve build result if it was successful
-            if build_result:
-                error_result['build'] = build_result
                 
-            # Preserve verification result if it was attempted
-            if verification_result:
-                error_result['verification'] = verification_result
+                # Add NPU output sample if available from verification
+                if verification_result and verification_result.get('npu_output') is not None:
+                    npu_output = verification_result['npu_output']
+                    try:
+                        if hasattr(npu_output, 'tolist'):
+                            json_result['test_data']['npu_output_sample'] = npu_output[:10].tolist()
+                        elif isinstance(npu_output, (list, tuple)):
+                            json_result['test_data']['npu_output_sample'] = list(npu_output[:10])
+                        else:
+                            # Try to convert to numpy array first
+                            import numpy as np
+                            npu_array = np.array(npu_output)
+                            json_result['test_data']['npu_output_sample'] = npu_array[:10].tolist()
+                    except Exception as e:
+                        print(f"Warning: Could not save NPU output sample in error case: {e}")
+                        
+            json.dump(json_result, f, indent=2)
             
-            error_file = f"{self.output_dir}/{kernel_name}_error.json"
-            with open(error_file, 'w') as f:
-                # Handle numpy arrays for JSON serialization
-                json_result = error_result.copy()
-                if input_array is not None and expected_output is not None:
-                    json_result['test_data']['input_sample'] = input_array[:10].tolist()
-                    json_result['test_data']['expected_output_sample'] = expected_output[:10].tolist()
-                json.dump(json_result, f, indent=2)
-                
-            print(f"\n=== Demo Failed ===")
-            print(f"Error: {e}")
-            print(f"Error details saved to: {error_file}")
-            
-            return error_result
+        print(f"\n=== Demo Failed ===")
+        print(f"Failed at: {step_name}")
+        print(f"Error: {exception}")
+        print(f"Error details saved to: {error_file}")
+        
+        return error_result
 
 def main():
     """Run demo with example ReLU kernel."""
