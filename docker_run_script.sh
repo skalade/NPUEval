@@ -14,8 +14,10 @@ docker run -it \
 	--device=/dev/dri \
 	--group-add video \
 	--group-add render \
-	-e HSA_OVERRIDE_GFX_VERSION=11.0.0 \
 	-e OLLAMA_MODELS=/host/ollama_models \
 	-v $(pwd):/host \
 	npueval \
 	bash
+
+# if on phoenix add this to enable iGPU
+#-e HSA_OVERRIDE_GFX_VERSION=11.0.0 \
