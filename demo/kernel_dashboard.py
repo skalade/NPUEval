@@ -608,9 +608,9 @@ def main():
                     # Get MAE from verification stats if available
                     mae = verification.get('stats', {}).get('abs_error_mean')
                     if mae is not None:
-                        st.error(f"❌ Functional test failed (Abs error: {mae:.6f})")
+                        st.warning(f"⚠️ High mean absolute error: {mae:.6f}")
                     else:
-                        st.error("❌ NPU verification failed")
+                        st.warning("⚠️ NPU verification failed")
                 elif failed_step == 'LLM generation failed':
                     st.error("❌ LLM kernel generation failed")
                 elif failed_step == 'Reference implementation generation failed':
