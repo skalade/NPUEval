@@ -558,7 +558,7 @@ def main():
                     # Get MAE from verification stats if available
                     mae = verification.get('stats', {}).get('abs_error_mean')
                     if mae is not None:
-                        st.error(f"❌ NPU verification failed (Abs error: {mae:.6f})")
+                        st.error(f"❌ Functional test failed (Abs error: {mae:.6f})")
                     else:
                         st.error("❌ NPU verification failed")
                 elif failed_step == 'LLM generation failed':
