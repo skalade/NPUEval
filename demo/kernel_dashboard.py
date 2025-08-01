@@ -250,7 +250,7 @@ def create_trace_visualization(trace_data: dict) -> go.Figure:
         st.error(f"Error creating trace visualization: {e}")
         return go.Figure()
 
-def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, selected_model: str, api_key: str = None, status_text=None, progress_bar=None) -> Dict[str, Any]:
+def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, selected_model: str, api_key: str = None, agentic_mode: bool = True, status_text=None, progress_bar=None) -> Dict[str, Any]:
     """
     Run the kernel generation pipeline.
     
@@ -271,7 +271,8 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
         # Initialize demo with selected model and local directory
         demo_kwargs = {
             'model': selected_model,
-            'output_dir': output_dir
+            'output_dir': output_dir,
+            'max_retries': 3 if agentic_mode else 0
         }
         
         # Add API key if provided
@@ -289,8 +290,13 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
             status_text.text("🔧 Compiling kernel...")
             progress_bar.progress(30)
         
+        # Create status callback for retry updates
+        def update_status(message):
+            if status_text:
+                status_text.text(message)
+        
         # Run the complete demo pipeline
-        result = demo.run_demo(prompt, kernel_name, data_type, array_size)
+        result = demo.run_demo(prompt, kernel_name, data_type, array_size, status_callback=update_status)
         
         # Update progress for remaining steps
         if status_text and progress_bar:
@@ -465,12 +471,24 @@ def main():
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        # Preset kernel prompts dropdown (outside form for dynamic updates)
-        preset_choice = st.selectbox(
-            "Preset Kernel Prompts",
-            options=list(PRESET_CONFIGS.keys()),
-            help="Choose a preset prompt or select 'Custom' to enter your own"
-        )
+        # Preset kernel prompts dropdown and agentic mode toggle (outside form for dynamic updates)
+        preset_col, agentic_col = st.columns([3, 1])
+        
+        with preset_col:
+            preset_choice = st.selectbox(
+                "Preset Kernel Prompts",
+                options=list(PRESET_CONFIGS.keys()),
+                help="Choose a preset prompt or select 'Custom' to enter your own"
+            )
+        
+        with agentic_col:
+            # Add empty label to align with selectbox label
+            st.markdown("<br>", unsafe_allow_html=True)  # Line break for alignment
+            agentic_mode = st.checkbox(
+                "Agentic Mode",
+                value=True,
+                help="Enable automatic retry with compiler feedback when compilation fails"
+            )
         
         # Auto-populate all fields based on selection
         config = PRESET_CONFIGS[preset_choice]
@@ -546,7 +564,7 @@ def main():
                     
                     try:
                         # Run generation and update progress as we go
-                        result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, api_key, status_text, progress_bar)
+                        result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, api_key, agentic_mode, status_text, progress_bar)
                         
                         progress_bar.progress(100)
                         status_text.text("✅ Generation complete!")
@@ -645,8 +663,39 @@ def main():
             
             # Generated code - show even if generation failed
             if result.get('generation', {}).get('generated_code'):
-                with st.expander("📄 Generated Kernel Code", expanded=True):
-                    st.code(result['generation']['generated_code'], language='cpp', height=400)
+                # Check if this was a retry attempt
+                generation_info = result.get('generation', {})
+                
+                if generation_info.get('retry_attempt'):
+                    failed_step = result.get('failed_step', '')
+                    
+                    # Only show retry messages for compilation-related failures
+                    if 'compilation' in failed_step.lower() or 'Kernel compilation failed' in failed_step:
+                        if result.get('success'):
+                            expander_title = "📄 Generated Kernel Code (Fixed after compilation error)"
+                            with st.expander(expander_title, expanded=True):
+                                st.success("🔄 Code was automatically fixed after compilation error!")
+                                if generation_info.get('original_error'):
+                                    with st.expander("View original compilation error", expanded=False):
+                                        st.code(generation_info['original_error'], language='text')
+                                st.code(generation_info['generated_code'], language='cpp', height=400)
+                        else:
+                            # Retry was attempted but compilation still failed
+                            expander_title = "📄 Generated Kernel Code (Retry attempted but still failed)"
+                            with st.expander(expander_title, expanded=True):
+                                st.warning("🔄 Code was regenerated to fix compilation errors, but compilation still failed")
+                                if generation_info.get('original_error'):
+                                    with st.expander("View original compilation error", expanded=False):
+                                        st.code(generation_info['original_error'], language='text')
+                                st.code(generation_info['generated_code'], language='cpp', height=400)
+                    else:
+                        # Retry happened but failure was not compilation-related (e.g., verification)
+                        # Show normal code display without retry messaging
+                        with st.expander("📄 Generated Kernel Code", expanded=True):
+                            st.code(generation_info['generated_code'], language='cpp', height=400)
+                else:
+                    with st.expander("📄 Generated Kernel Code", expanded=True):
+                        st.code(generation_info['generated_code'], language='cpp', height=400)
         
         elif st.session_state.generation_complete:
             st.info("No results to display")

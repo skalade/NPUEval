@@ -21,16 +21,17 @@ from npueval.tools import aie_compiler, build_single_kernel_app
 from npueval.executor import NPUExecutor
 
 # Import prompts
-from prompts import KERNEL_SYSTEM_PROMPT, REFERENCE_SYSTEM_PROMPT, get_reference_prompt
+from prompts import KERNEL_SYSTEM_PROMPT, REFERENCE_SYSTEM_PROMPT, RETRY_SYSTEM_PROMPT, get_reference_prompt, get_retry_prompt
 
 class NPUKernelDemo:
     """Demo class for generating NPU kernels from prompts."""
     
-    def __init__(self, model: str = "gpt-4o-mini", output_dir: str = "demo_results", api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4o-mini", output_dir: str = "demo_results", api_key: Optional[str] = None, base_url: Optional[str] = None, max_retries: int = 2):
         """Initialize the demo with specified model and output directory."""
         self.model = model
         self.output_dir = output_dir
         self.temperature = 0.4
+        self.max_retries = max_retries
         
         # Initialize OpenAI client
         client_kwargs = {}
@@ -108,6 +109,55 @@ class NPUKernelDemo:
         
         return result
 
+    def retry_kernel_generation(self, original_prompt: str, failed_code: str, compiler_error: str, 
+                               kernel_name: str, data_type: str, array_size: int) -> Dict[str, Any]:
+        """
+        Retry kernel generation with compiler feedback.
+        
+        Args:
+            original_prompt: Original user prompt for the kernel
+            failed_code: The previous kernel code that failed to compile
+            compiler_error: The compiler error message
+            kernel_name: Name of the kernel function
+            data_type: Data type for arrays
+            array_size: Size of arrays
+            
+        Returns:
+            Dictionary with regenerated kernel information
+        """
+        print(f"Retrying kernel generation with compiler feedback...")
+        
+        # Generate retry prompt with error context
+        retry_prompt = get_retry_prompt(original_prompt, failed_code, compiler_error, 
+                                      kernel_name, data_type, array_size)
+        
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": RETRY_SYSTEM_PROMPT},
+                {"role": "user", "content": retry_prompt}
+            ],
+            temperature=self.temperature
+        )
+        
+        generated_text = response.choices[0].message.content
+        generated_code = self.extract_codeblock(generated_text)
+        
+        if not generated_code:
+            raise ValueError("No code block found in LLM response during retry")
+            
+        result = {
+            'kernel_name': kernel_name,
+            'prompt': original_prompt,
+            'generated_code': generated_code,
+            'response_text': generated_text,
+            'token_usage': response.usage.model_dump(),
+            'retry_attempt': True,
+            'original_error': compiler_error
+        }
+        
+        return result
+
     def generate_reference_implementation(self, prompt: str, data_type: str, array_size: int) -> str:
         """
         Generate reference Python implementation using LLM.
@@ -174,7 +224,7 @@ class NPUKernelDemo:
         
         # Execute the reference code to get expected output
         local_vars = {'input_array': input_array}
-        global_vars = {'np': np, 'bfloat16': bfloat16}
+        global_vars = {'np': np, 'numpy': np, 'bfloat16': bfloat16}
         
         try:
             # Execute the generated reference function
@@ -413,7 +463,8 @@ extern "C" {{
         return verification_result
     
     def run_demo(self, prompt: str, kernel_name: str, 
-                data_type: str = "int8", array_size: int = 1024) -> Dict[str, Any]:
+                data_type: str = "int8", array_size: int = 1024, 
+                status_callback=None) -> Dict[str, Any]:
         """
         Run the complete demo pipeline: generate -> build -> verify.
         
@@ -456,20 +507,61 @@ extern "C" {{
                 generation_result, input_array, expected_output, build_result, verification_result
             )
         
-        # Step 3: Build xclbin
-        try:
-            build_result = self.build_xclbin(
-                generation_result['generated_code'],
-                kernel_name,
-                input_array,
-                expected_output,
-                data_type
-            )
-        except Exception as e:
-            return self._create_error_result(
-                kernel_name, "Kernel compilation failed", e,
-                generation_result, input_array, expected_output, build_result, verification_result
-            )
+        # Step 3: Build xclbin with retry mechanism
+        current_generation_result = generation_result
+        retry_count = 0
+        
+        while retry_count <= self.max_retries:
+            try:
+                build_result = self.build_xclbin(
+                    current_generation_result['generated_code'],
+                    kernel_name,
+                    input_array,
+                    expected_output,
+                    data_type
+                )
+                # Success! Break out of retry loop
+                if retry_count > 0:
+                    print(f"✅ Compilation succeeded after {retry_count} retry attempt(s)")
+                break
+                
+            except Exception as e:
+                compiler_error = str(e)
+                print(f"❌ Compilation attempt {retry_count + 1} failed: {compiler_error}")
+                
+                # If we've exhausted retries, return error
+                if retry_count >= self.max_retries:
+                    return self._create_error_result(
+                        kernel_name, "Kernel compilation failed", e,
+                        current_generation_result, input_array, expected_output, build_result, verification_result
+                    )
+                
+                # Try to retry with compiler feedback
+                try:
+                    print(f"🔄 Attempting retry {retry_count + 1}/{self.max_retries} with compiler feedback...")
+                    if status_callback:
+                        status_callback(f"🔄 Re-generating code (attempt {retry_count + 1}/{self.max_retries})...")
+                    current_generation_result = self.retry_kernel_generation(
+                        prompt, 
+                        current_generation_result['generated_code'],
+                        compiler_error,
+                        kernel_name,
+                        data_type,
+                        array_size
+                    )
+                    retry_count += 1
+                    if status_callback:
+                        status_callback(f"🔧 Re-compiling fixed code (attempt {retry_count}/{self.max_retries})...")
+                    
+                except Exception as retry_e:
+                    print(f"❌ Retry generation failed: {retry_e}")
+                    return self._create_error_result(
+                        kernel_name, "LLM retry generation failed", retry_e,
+                        current_generation_result, input_array, expected_output, build_result, verification_result
+                    )
+        
+        # Update generation_result to reflect the final successful version (may include retry info)
+        generation_result = current_generation_result
         
         # Step 4: Verify on NPU
         try:
