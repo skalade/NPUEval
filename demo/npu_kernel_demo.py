@@ -483,6 +483,16 @@ extern "C" {{
                 generation_result, input_array, expected_output, build_result, verification_result
             )
         
+        # Check if verification failed (NPU ran but accuracy was not met)
+        if not verification_result['success']:
+            # Create error result but include all the verification data
+            mae = verification_result.get('stats', {}).get('abs_error_mean', 0)
+            error_msg = f"Verification accuracy not met (Abs error: {mae:.6f})"
+            return self._create_error_result(
+                kernel_name, "NPU verification failed", ValueError(error_msg),
+                generation_result, input_array, expected_output, build_result, verification_result
+            )
+        
         # Create a clean verification result without numpy arrays for the main result
         clean_verification_result = {k: v for k, v in verification_result.items() if k != 'npu_output'}
         
@@ -583,6 +593,17 @@ extern "C" {{
         if verification_result:
             clean_verification = {k: v for k, v in verification_result.items() if k != 'npu_output'}
             error_result['verification'] = clean_verification
+            
+            # If NPU ran but verification failed, include NPU output sample in test_data
+            if verification_result.get('npu_output') is not None and input_array is not None and expected_output is not None:
+                npu_output = verification_result['npu_output']
+                if 'test_data' not in error_result:
+                    error_result['test_data'] = {
+                        'input_shape': list(input_array.shape),
+                        'input_dtype': str(input_array.dtype),
+                        'output_shape': list(expected_output.shape),
+                        'output_dtype': str(expected_output.dtype)
+                    }
         
         # Save error details
         error_file = f"{self.output_dir}/{kernel_name}_error.json"

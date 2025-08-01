@@ -298,9 +298,10 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
                 progress_bar.progress(90)
                 time.sleep(1)  # Brief pause to show step
         
-        # Copy trace data to session if available - look for the actual JSON trace file
-        if result.get('success'):
-            # Look for JSON trace files in the output directory
+        # Copy trace data to session if available - only if NPU actually ran
+        # (Only look for trace files if we reached NPU execution stage)
+        if result.get('success') or (result.get('verification') and not result.get('success')):
+            # NPU ran (either successfully or failed verification) - look for trace files
             output_dir = "streamlit_results" 
             trace_files = []
             if os.path.exists(output_dir):
@@ -320,6 +321,12 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
                 except Exception as e:
                     st.warning(f"Could not read trace file {trace_file}: {e}")
                     st.session_state.trace_data = None
+            else:
+                # No trace files found even though NPU should have run
+                st.session_state.trace_data = None
+        else:
+            # Generation failed before NPU execution - ensure no old trace data
+            st.session_state.trace_data = None
         
         return result
             
@@ -494,6 +501,9 @@ def main():
             elif model_provider == "OpenAI" and not api_key:
                 st.error("Please provide an OpenAI API key in the sidebar")
             else:
+                # Clear previous trace data when starting new generation
+                st.session_state.trace_data = None
+                
                 with st.spinner("Generating kernel... This may take a few minutes."):
                     # Progress indicators with detailed steps
                     progress_bar = st.progress(0)
@@ -502,20 +512,34 @@ def main():
                     status_text.text("🤖 Generating kernel code with AI...")
                     progress_bar.progress(10)
                     
-                    # Run generation and update progress as we go
-                    result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, status_text, progress_bar)
+                    try:
+                        # Run generation and update progress as we go
+                        result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, status_text, progress_bar)
+                        
+                        progress_bar.progress(100)
+                        status_text.text("✅ Generation complete!")
+                        
+                    except Exception as e:
+                        # Handle any unexpected errors during generation
+                        result = {
+                            'success': False,
+                            'error': str(e),
+                            'error_type': type(e).__name__,
+                            'failed_step': 'Generation pipeline error'
+                        }
+                        progress_bar.progress(100)
+                        status_text.text("❌ Generation failed!")
                     
-                    progress_bar.progress(100)
-                    status_text.text("✅ Generation complete!")
-                    
-                    st.session_state.demo_results = result
-                    st.session_state.generation_complete = True
-                    
-                    # Clear progress indicators after a brief delay
-                    import time
-                    time.sleep(1)
-                    progress_bar.empty()
-                    status_text.empty()
+                    finally:
+                        # Always store result
+                        st.session_state.demo_results = result
+                        st.session_state.generation_complete = True
+                        
+                        # Clear progress indicators after a brief delay
+                        import time
+                        time.sleep(1)
+                        progress_bar.empty()
+                        status_text.empty()
         
         # Show results underneath the form (after generation logic)
         if st.session_state.demo_results:
@@ -524,12 +548,40 @@ def main():
             # Status indicator
             if result.get('success'):
                 st.success("✅ Kernel generation and verification successful!")
-                
-                # Display performance metrics and data samples if available
+            else:
+                # Display specific error message based on failed step
+                failed_step = result.get('failed_step', 'Unknown step')
                 verification = result.get('verification', {})
-                test_data = result.get('test_data', {})
-                total_cycles = verification.get('total_cycles')
                 
+                # Show performance metrics and data samples even for failed verification
+                if failed_step == 'NPU verification failed' and verification:
+                    # Get MAE from verification stats if available
+                    mae = verification.get('stats', {}).get('abs_error_mean')
+                    if mae is not None:
+                        st.error(f"❌ NPU verification failed (Abs error: {mae:.6f})")
+                    else:
+                        st.error("❌ NPU verification failed")
+                elif failed_step == 'LLM generation failed':
+                    st.error("❌ LLM kernel generation failed")
+                elif failed_step == 'Reference implementation generation failed':
+                    st.error("❌ Reference implementation generation failed")
+                elif failed_step == 'Kernel compilation failed':
+                    st.error("❌ Kernel compilation failed")
+                else:
+                    st.error("❌ Kernel generation pipeline failed")
+                
+                # Show detailed error message
+                if result.get('detailed_error'):
+                    st.error(f"Details: {result['detailed_error']}")
+                elif result.get('error'):
+                    st.error(f"Error: {result['error']}")
+            
+            # Always show performance metrics and data samples if available (regardless of success/failure)
+            verification = result.get('verification', {})
+            test_data = result.get('test_data', {})
+            total_cycles = verification.get('total_cycles')
+            
+            if verification or test_data:
                 col_a, col_b = st.columns(2)
                 
                 # Show input/output samples if available
@@ -547,32 +599,11 @@ def main():
                         sample_size = min(5, len(input_sample))
                         input_str = "[" + ", ".join(str(input_sample[i]) for i in range(sample_size)) + ", ...]"
                         st.text(input_str)
-                    else:
-                        st.markdown("**No sample data available**")
                 
                 # Show total cycles if available
                 if total_cycles is not None:
                     with col_b:
                         st.metric("Total Cycles", f"{total_cycles:,}")
-            else:
-                # Display specific error message based on failed step
-                failed_step = result.get('failed_step', 'Unknown step')
-                if failed_step == 'LLM generation failed':
-                    st.error("❌ LLM kernel generation failed")
-                elif failed_step == 'Reference implementation generation failed':
-                    st.error("❌ Reference implementation generation failed")
-                elif failed_step == 'Kernel compilation failed':
-                    st.error("❌ Kernel compilation failed")
-                elif failed_step == 'NPU verification failed':
-                    st.error("❌ NPU verification failed")
-                else:
-                    st.error("❌ Kernel generation pipeline failed")
-                
-                # Show detailed error message
-                if result.get('detailed_error'):
-                    st.error(f"Details: {result['detailed_error']}")
-                elif result.get('error'):
-                    st.error(f"Error: {result['error']}")
     
     with col2:
         
@@ -603,8 +634,13 @@ def main():
             import traceback
             st.code(traceback.format_exc())
     else:
-        # Show empty placeholder chart
+        # Show empty placeholder chart with different message based on state
         empty_fig = go.Figure()
+        
+        # Show simple message for empty trace plot
+        message = "Generate a kernel to see trace visualization"
+        color = "gray"
+            
         empty_fig.update_layout(
             title="NPU Kernel Execution Trace",
             xaxis_title="Time (ns)",
@@ -612,11 +648,11 @@ def main():
             height=400,
             annotations=[
                 dict(
-                    text="Generate a kernel to see trace visualization",
+                    text=message,
                     xref="paper", yref="paper",
                     x=0.5, y=0.5, xanchor='center', yanchor='middle',
                     showarrow=False,
-                    font=dict(size=16, color="gray")
+                    font=dict(size=16, color=color)
                 )
             ]
         )
