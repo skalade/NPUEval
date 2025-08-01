@@ -570,11 +570,6 @@ def main():
                 else:
                     st.error("❌ Kernel generation pipeline failed")
                 
-                # Show detailed error message
-                if result.get('detailed_error'):
-                    st.error(f"Details: {result['detailed_error']}")
-                elif result.get('error'):
-                    st.error(f"Error: {result['error']}")
             
             # Always show performance metrics and data samples if available (regardless of success/failure)
             verification = result.get('verification', {})
@@ -630,9 +625,7 @@ def main():
             else:
                 st.info("No trace data available for visualization")
         except Exception as e:
-            st.error(f"Error creating trace visualization: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+            st.error("Error creating trace visualization")
     else:
         # Show empty placeholder chart with different message based on state
         empty_fig = go.Figure()
