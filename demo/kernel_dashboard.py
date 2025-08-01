@@ -661,41 +661,42 @@ def main():
         if st.session_state.demo_results:
             result = st.session_state.demo_results
             
-            # Generated code - show even if generation failed
+            # Generated code tabs - show even if generation failed
             if result.get('generation', {}).get('generated_code'):
-                # Check if this was a retry attempt
                 generation_info = result.get('generation', {})
+                reference_info = result.get('reference', {})
                 
+                # Show retry messages if applicable
+                retry_message = None
                 if generation_info.get('retry_attempt'):
                     failed_step = result.get('failed_step', '')
-                    
-                    # Only show retry messages for compilation-related failures
                     if 'compilation' in failed_step.lower() or 'Kernel compilation failed' in failed_step:
                         if result.get('success'):
-                            expander_title = "📄 Generated Kernel Code (Fixed after compilation error)"
-                            with st.expander(expander_title, expanded=True):
-                                st.success("🔄 Code was automatically fixed after compilation error!")
-                                if generation_info.get('original_error'):
-                                    with st.expander("View original compilation error", expanded=False):
-                                        st.code(generation_info['original_error'], language='text')
-                                st.code(generation_info['generated_code'], language='cpp', height=400)
+                            retry_message = ("success", "🔄 Code was automatically fixed after compilation error!")
                         else:
-                            # Retry was attempted but compilation still failed
-                            expander_title = "📄 Generated Kernel Code (Retry attempted but still failed)"
-                            with st.expander(expander_title, expanded=True):
-                                st.warning("🔄 Code was regenerated to fix compilation errors, but compilation still failed")
-                                if generation_info.get('original_error'):
-                                    with st.expander("View original compilation error", expanded=False):
-                                        st.code(generation_info['original_error'], language='text')
-                                st.code(generation_info['generated_code'], language='cpp', height=400)
+                            retry_message = ("warning", "🔄 Code was regenerated to fix compilation errors, but compilation still failed")
+                
+                # Create tabs for C++ and Python code
+                cpp_tab, python_tab = st.tabs(["C++ Kernel Code", "Python Reference Code"])
+                
+                with cpp_tab:
+                    if retry_message:
+                        if retry_message[0] == "success":
+                            st.success(retry_message[1])
+                        else:
+                            st.warning(retry_message[1])
+                        
+                        if generation_info.get('original_error'):
+                            with st.expander("View original compilation error", expanded=False):
+                                st.code(generation_info['original_error'], language='text')
+                    
+                    st.code(generation_info['generated_code'], language='cpp', height=400)
+                
+                with python_tab:
+                    if reference_info.get('reference_code'):
+                        st.code(reference_info['reference_code'], language='python', height=400)
                     else:
-                        # Retry happened but failure was not compilation-related (e.g., verification)
-                        # Show normal code display without retry messaging
-                        with st.expander("📄 Generated Kernel Code", expanded=True):
-                            st.code(generation_info['generated_code'], language='cpp', height=400)
-                else:
-                    with st.expander("📄 Generated Kernel Code", expanded=True):
-                        st.code(generation_info['generated_code'], language='cpp', height=400)
+                        st.info("Python reference code not available")
         
         elif st.session_state.generation_complete:
             st.info("No results to display")

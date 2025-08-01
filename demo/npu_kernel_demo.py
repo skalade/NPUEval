@@ -204,7 +204,7 @@ class NPUKernelDemo:
             size: Size of the arrays
             
         Returns:
-            Tuple of (input_array, reference_output_array)
+            Tuple of (input_array, reference_output_array, reference_code)
         """
         # Generate input array
         np.random.seed(42)
@@ -251,7 +251,7 @@ class NPUKernelDemo:
             print(f"Generated reference code:\n{reference_code}")
             raise ValueError(f"Failed to execute LLM-generated reference implementation: {e}")
             
-        return input_array, reference_output
+        return input_array, reference_output, reference_code
     
     def build_xclbin(self, kernel_code: str, kernel_name: str, 
                     input_array: np.ndarray, output_array: np.ndarray, data_type: str) -> Dict[str, Any]:
@@ -500,7 +500,7 @@ extern "C" {{
         
         # Step 2: Create test arrays using LLM-generated reference
         try:
-            input_array, expected_output = self.create_test_arrays(prompt, data_type, array_size)
+            input_array, expected_output, reference_code = self.create_test_arrays(prompt, data_type, array_size)
         except Exception as e:
             return self._create_error_result(
                 kernel_name, "Reference implementation generation failed", e,
@@ -533,7 +533,7 @@ extern "C" {{
                 if retry_count >= self.max_retries:
                     return self._create_error_result(
                         kernel_name, "Kernel compilation failed", e,
-                        current_generation_result, input_array, expected_output, build_result, verification_result
+                        current_generation_result, input_array, expected_output, build_result, verification_result, reference_code
                     )
                 
                 # Try to retry with compiler feedback
@@ -557,7 +557,7 @@ extern "C" {{
                     print(f"❌ Retry generation failed: {retry_e}")
                     return self._create_error_result(
                         kernel_name, "LLM retry generation failed", retry_e,
-                        current_generation_result, input_array, expected_output, build_result, verification_result
+                        current_generation_result, input_array, expected_output, build_result, verification_result, reference_code
                     )
         
         # Update generation_result to reflect the final successful version (may include retry info)
@@ -575,7 +575,7 @@ extern "C" {{
         except Exception as e:
             return self._create_error_result(
                 kernel_name, "NPU verification failed", e,
-                generation_result, input_array, expected_output, build_result, verification_result
+                generation_result, input_array, expected_output, build_result, verification_result, reference_code
             )
         
         # Check if verification failed (NPU ran but accuracy was not met)
@@ -585,7 +585,7 @@ extern "C" {{
             error_msg = f"Verification accuracy not met (Abs error: {mae:.6f})"
             return self._create_error_result(
                 kernel_name, "NPU verification failed", ValueError(error_msg),
-                generation_result, input_array, expected_output, build_result, verification_result
+                generation_result, input_array, expected_output, build_result, verification_result, reference_code
             )
         
         # Create a clean verification result without numpy arrays for the main result
@@ -595,6 +595,9 @@ extern "C" {{
         demo_result = {
             'success': verification_result['success'],
             'generation': generation_result,
+            'reference': {
+                'reference_code': reference_code
+            },
             'build': build_result,
             'verification': clean_verification_result,
             'test_data': {
@@ -642,7 +645,7 @@ extern "C" {{
         return demo_result
     
     def _create_error_result(self, kernel_name: str, step_name: str, exception: Exception,
-                           generation_result, input_array, expected_output, build_result, verification_result) -> Dict[str, Any]:
+                           generation_result, input_array, expected_output, build_result, verification_result, reference_code=None) -> Dict[str, Any]:
         """
         Create an error result with specific step information and preserve successful steps.
         
@@ -670,6 +673,12 @@ extern "C" {{
         # Preserve generation result if it was successful
         if generation_result:
             error_result['generation'] = generation_result
+            
+        # Preserve reference code if it was generated
+        if reference_code:
+            error_result['reference'] = {
+                'reference_code': reference_code
+            }
         
         # Preserve test data if arrays were created
         if input_array is not None and expected_output is not None:
