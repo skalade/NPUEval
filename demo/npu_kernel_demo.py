@@ -26,17 +26,20 @@ from prompts import KERNEL_SYSTEM_PROMPT, REFERENCE_SYSTEM_PROMPT, get_reference
 class NPUKernelDemo:
     """Demo class for generating NPU kernels from prompts."""
     
-    def __init__(self, model: str = "gpt-4o-mini", output_dir: str = "demo_results", api_key: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4o-mini", output_dir: str = "demo_results", api_key: Optional[str] = None, base_url: Optional[str] = None):
         """Initialize the demo with specified model and output directory."""
         self.model = model
         self.output_dir = output_dir
         self.temperature = 0.4
         
         # Initialize OpenAI client
+        client_kwargs = {}
         if api_key:
-            self.client = openai.OpenAI(api_key=api_key)
-        else:
-            self.client = openai.OpenAI()
+            client_kwargs['api_key'] = api_key
+        if base_url:
+            client_kwargs['base_url'] = base_url
+            
+        self.client = openai.OpenAI(**client_kwargs)
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)

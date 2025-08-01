@@ -250,7 +250,7 @@ def create_trace_visualization(trace_data: dict) -> go.Figure:
         st.error(f"Error creating trace visualization: {e}")
         return go.Figure()
 
-def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, selected_model: str, status_text=None, progress_bar=None) -> Dict[str, Any]:
+def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_size: int, selected_model: str, api_key: str = None, status_text=None, progress_bar=None) -> Dict[str, Any]:
     """
     Run the kernel generation pipeline.
     
@@ -269,10 +269,20 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
         os.makedirs(output_dir, exist_ok=True)
         
         # Initialize demo with selected model and local directory
-        demo = NPUKernelDemo(
-            model=selected_model, 
-            output_dir=output_dir
-        )
+        demo_kwargs = {
+            'model': selected_model,
+            'output_dir': output_dir
+        }
+        
+        # Add API key if provided
+        if api_key:
+            demo_kwargs['api_key'] = api_key
+        
+        # Add base_url for Anthropic
+        if selected_model.startswith('claude-'):
+            demo_kwargs['base_url'] = "https://api.anthropic.com/v1/"
+            
+        demo = NPUKernelDemo(**demo_kwargs)
         
         # Update progress through each step
         if status_text and progress_bar:
@@ -380,7 +390,7 @@ def main():
         # Model selection
         model_provider = st.selectbox(
             "Model Provider",
-            ["OpenAI", "Ollama"],
+            ["OpenAI", "Anthropic", "Ollama"],
             help="Choose the LLM provider"
         )
         
@@ -401,6 +411,24 @@ def main():
                 help="Choose the OpenAI model"
             )
             selected_model = openai_model
+            
+        elif model_provider == "Anthropic":
+            # Anthropic API Key input
+            api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+            if not api_key:
+                api_key = st.text_input("Anthropic API Key", type="password", help="Enter your Anthropic API key")
+                if api_key:
+                    os.environ['ANTHROPIC_API_KEY'] = api_key
+            else:
+                st.success("✅ Using Anthropic API key from environment")
+            
+            # Anthropic model selection
+            anthropic_model = st.selectbox(
+                "Anthropic Model",
+                ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+                help="Choose the Anthropic model"
+            )
+            selected_model = anthropic_model
             
         else:  # Ollama
             # Ollama configuration
@@ -500,6 +528,8 @@ def main():
                 st.error("Please enter a kernel description")
             elif model_provider == "OpenAI" and not api_key:
                 st.error("Please provide an OpenAI API key in the sidebar")
+            elif model_provider == "Anthropic" and not api_key:
+                st.error("Please provide an Anthropic API key in the sidebar")
             else:
                 # Clear previous trace data when starting new generation
                 st.session_state.trace_data = None
@@ -514,7 +544,7 @@ def main():
                     
                     try:
                         # Run generation and update progress as we go
-                        result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, status_text, progress_bar)
+                        result = run_kernel_generation(prompt, kernel_name, data_type, array_size, selected_model, api_key, status_text, progress_bar)
                         
                         progress_bar.progress(100)
                         status_text.text("✅ Generation complete!")
