@@ -531,8 +531,10 @@ def main():
             elif model_provider == "Anthropic" and not api_key:
                 st.error("Please provide an Anthropic API key in the sidebar")
             else:
-                # Clear previous trace data when starting new generation
+                # Clear previous data when starting new generation
                 st.session_state.trace_data = None
+                st.session_state.demo_results = None
+                st.session_state.generation_complete = False
                 
                 with st.spinner("Generating kernel... This may take a few minutes."):
                     # Progress indicators with detailed steps
@@ -601,12 +603,18 @@ def main():
                     st.error("❌ Kernel generation pipeline failed")
                 
             
-            # Always show performance metrics and data samples if available (regardless of success/failure)
+            # Only show performance metrics and data samples if NPU actually executed
             verification = result.get('verification', {})
             test_data = result.get('test_data', {})
             total_cycles = verification.get('total_cycles')
+            failed_step = result.get('failed_step', '')
             
-            if verification or test_data:
+            # Only show data if we got past kernel compilation (NPU ran)
+            npu_executed = (result.get('success') or 
+                          failed_step == 'NPU verification failed' or
+                          (verification and total_cycles is not None))
+            
+            if npu_executed and (verification or test_data):
                 col_a, col_b = st.columns(2)
                 
                 # Show input/output samples if available
