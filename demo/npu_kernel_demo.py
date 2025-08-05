@@ -10,12 +10,10 @@ from typing import Optional, Dict, Any, Tuple
 import openai
 from ml_dtypes import bfloat16
 
-# Import npueval modules
 from npueval.iron import build_app
 from npueval.tools import aie_compiler, build_single_kernel_app
 from npueval.executor import NPUExecutor
 
-# Import prompts
 from prompts import KERNEL_SYSTEM_PROMPT, REFERENCE_SYSTEM_PROMPT, RETRY_SYSTEM_PROMPT, get_reference_prompt, get_retry_prompt
 
 class NPUKernelDemo:
@@ -176,7 +174,7 @@ class NPUKernelDemo:
                 {"role": "system", "content": REFERENCE_SYSTEM_PROMPT},
                 {"role": "user", "content": reference_prompt}
             ],
-            temperature=0.1,  # Lower temperature for more deterministic reference
+            temperature=0.1,  # Lower temperature for more determinism in Python
             seed=42
         )
         

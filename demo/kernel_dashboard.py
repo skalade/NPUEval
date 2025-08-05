@@ -142,7 +142,7 @@ def create_trace_visualization(trace_data: dict) -> go.Figure:
                 mode='lines'
             ), row=1, col=1)
         
-        # Add DMA events to second panel
+        # Add DMA events to second panel - these won't be as useful but good to have
         for _, row in dma_events.iterrows():
             y_pos = len(dma_names) - dma_names.index(row['name']) - 1
             
@@ -324,7 +324,6 @@ def run_kernel_generation(prompt: str, kernel_name: str, data_type: str, array_s
                 # Use the first JSON trace file found
                 trace_file = trace_files[0]
                 try:
-                    # Use the exact same logic as the working test plot
                     with open(trace_file) as f:
                         data = json.load(f)
                     events = data if isinstance(data, list) else data.get("traceEvents", [])
@@ -616,13 +615,13 @@ def main():
                     st.error("❌ Kernel generation pipeline failed")
                 
             
-            # Only show performance metrics and data samples if NPU actually executed
+            # Only show performance metrics and data samples if NPU actually ran
             verification = result.get('verification', {})
             test_data = result.get('test_data', {})
             total_cycles = verification.get('total_cycles')
             failed_step = result.get('failed_step', '')
             
-            # Only show data if we got past kernel compilation (NPU ran)
+            # Only show data if we got past kernel compilation
             npu_executed = (result.get('success') or 
                           failed_step == 'NPU verification failed' or
                           (verification and total_cycles is not None))
@@ -661,7 +660,7 @@ def main():
                 generation_info = result.get('generation', {})
                 reference_info = result.get('reference', {})
                 
-                # Show retry messages if applicable
+                # Show retry messages
                 retry_message = None
                 if generation_info.get('retry_attempt'):
                     failed_step = result.get('failed_step', '')
@@ -671,7 +670,6 @@ def main():
                         else:
                             retry_message = ("warning", "🔄 Code was regenerated to fix compilation errors, but compilation still failed")
                 
-                # Create tabs for C++ and Python code
                 cpp_tab, python_tab = st.tabs(["C++ Kernel", "Python Reference"])
                 
                 with cpp_tab:
@@ -698,8 +696,7 @@ def main():
         else:
             st.info("👈 Enter a kernel description and click 'Generate & Verify Kernel' to get started")
     
-    # Trace visualization section - always show, populate after generation
-    
+    # Trace visualization section - always show, populate after generation 
     if st.session_state.trace_data:
         try:
             fig = create_trace_visualization(st.session_state.trace_data)
