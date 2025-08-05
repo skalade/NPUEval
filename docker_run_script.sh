@@ -10,14 +10,6 @@ docker run -it \
 	--device=/dev/accel/accel0:/dev/accel/accel0 \
 	--cap-add=NET_ADMIN \
 	--ulimit memlock=-1 \
-	--device=/dev/kfd \
-	--device=/dev/dri \
-	--group-add video \
-	--group-add render \
-	-e OLLAMA_MODELS=/host/ollama_models \
 	-v $(pwd):/host \
 	npueval \
-	bash
-
-# if on phoenix add this to enable iGPU
-#-e HSA_OVERRIDE_GFX_VERSION=11.0.0 \
+	bash -c "cd /host && python3 scripts/check_xrt_versions.py  && python3 $1"
