@@ -1,10 +1,5 @@
-#!/usr/bin/env python3
-"""
-NPU Kernel Generation Dashboard
-
-A Streamlit dashboard that allows users to write prompts and generates, 
-verifies, and displays traces of NPU kernels.
-"""
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
 
 import streamlit as st
 import os
@@ -369,7 +364,7 @@ def main():
     
     # Try to load and encode logo
     try:
-        with open("logo.png", "rb") as f:
+        with open("img/ryzenai_logo.png", "rb") as f:
             logo_data = base64.b64encode(f.read()).decode()
         logo_html = f'<img src="data:image/png;base64,{logo_data}" style="height: 64px;">'
     except FileNotFoundError:
@@ -677,7 +672,7 @@ def main():
                             retry_message = ("warning", "🔄 Code was regenerated to fix compilation errors, but compilation still failed")
                 
                 # Create tabs for C++ and Python code
-                cpp_tab, python_tab = st.tabs(["C++ Kernel Code", "Python Reference Code"])
+                cpp_tab, python_tab = st.tabs(["C++ Kernel", "Python Reference"])
                 
                 with cpp_tab:
                     if retry_message:
