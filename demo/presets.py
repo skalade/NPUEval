@@ -1,10 +1,5 @@
-#!/usr/bin/env python3
-"""
-Preset configurations for the NPU Kernel Dashboard.
-
-This module contains predefined kernel configurations that users can select
-from in the dashboard interface.
-"""
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
 
 # Preset kernel configurations for the dashboard
 PRESET_CONFIGS = {

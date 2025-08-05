@@ -1,10 +1,5 @@
-#!/usr/bin/env python3
-"""
-NPU Kernel Generation Demo
-
-A demo that generates NPU kernels from prompts, builds xclbins, and verifies results.
-Limited to 1-input, 1-output kernels as specified.
-"""
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
 
 import os
 import re

@@ -1,10 +1,5 @@
-#!/usr/bin/env python3
-"""
-System prompts for NPU kernel generation.
-
-This module contains all the system prompts used by the NPU kernel generation
-demo for consistent AI-generated code and reference implementations.
-"""
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
 
 # Kernel generation system prompt for AIE C++ code
 KERNEL_SYSTEM_PROMPT = """You are a part of a code generation system for AIE (AI Engines).
@@ -51,7 +46,7 @@ void add_offset_int8(int8_t *in_buffer, int8_t *out_buffer, int8_t offset) {
 </example2>
 """
 
-# Reference implementation system prompt for Python code
+# Reference implementation system prompt for python code
 REFERENCE_SYSTEM_PROMPT = """You are a Python code generator that creates reference implementations for mathematical operations.
 
 * Generate ONLY Python code that implements the mathematical operation described
